@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype Akuaponik Pesisir 3D v2</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; overflow: hidden; color: #12313a;
+         background: radial-gradient(circle at 50% 30%, #f4fbfc 0%, #cfe9ee 60%, #a9d3dc 100%); }
+  canvas { display: block; }
+  .kartu { position: fixed; background: rgba(255,255,255,.88); backdrop-filter: blur(6px);
+           border-radius: 14px; box-shadow: 0 6px 24px rgba(10,60,80,.18); padding: 14px 16px; font-size: 13px; }
+  #judul { top: 14px; left: 14px; width: 270px; }
+  #judul h1 { font-size: 16px; color: #0b5d6b; margin-bottom: 2px; }
+  #judul p { font-size: 11.5px; color: #4b6b73; margin-bottom: 10px; }
+  .baris { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+  button { border: none; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+           background: #0b7285; color: #fff; min-width: 64px; }
+  button:hover { background: #09586a; }
+  input[type=range] { width: 120px; accent-color: #0b7285; }
+  #data { bottom: 14px; left: 14px; width: 270px; }
+  #data h2, #info h2 { font-size: 13px; color: #0b5d6b; margin-bottom: 8px; }
+  .nilai { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed #c9dde2; }
+  .nilai b { color: #0b7285; font-variant-numeric: tabular-nums; }
+  #info { top: 14px; right: 14px; width: 290px; }
+  #info h2 { font-size: 15px; }
+  #info p { line-height: 1.5; color: #28454d; }
+  #tip { position: fixed; pointer-events: none; background: #0b3d47; color: #fff; padding: 4px 9px;
+         border-radius: 6px; font-size: 12px; opacity: 0; transition: opacity .12s; }
+  #petunjuk { position: fixed; bottom: 14px; right: 14px; font-size: 11.5px; color: #36565e; text-align: right; }
+  @media (max-width: 720px) { #info { top: auto; bottom: 150px; right: 14px; left: 14px; width: auto; } #data { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="kartu" id="judul">
+  <h1>Lumbung Pangan Pesisir</h1>
+  <p>Prototype akuaponik pintar (ESP32 + sensor IoT + panel surya) &ndash; versi 3D interaktif</p>
+  <div class="baris"><span>Pompa air</span><button id="btnPompa">HIDUP</button></div>
+  <div class="baris"><span>Kaca tangki</span><button id="btnKaca">TRANSPARAN</button></div>
+  <div class="baris"><span>Putar otomatis</span><button id="btnPutar">MATI</button></div>
+  <div class="baris"><span>Bongkar (exploded)</span><input type="range" id="sldBongkar" min="0" max="100" value="0"></div>
+  <div class="baris"><span>Kecepatan ikan</span><input type="range" id="sldIkan" min="0" max="300" value="100"></div>
+</div>
+
+<div class="kartu" id="data">
+  <h2>Data sensor (simulasi real-time)</h2>
+  <div class="nilai"><span>pH air</span><b id="vPh">-</b></div>
+  <div class="nilai"><span>Suhu air</span><b id="vSuhu">-</b></div>
+  <div class="nilai"><span>Oksigen terlarut (DO)</span><b id="vDo">-</b></div>
+  <div class="nilai"><span>Kelembapan udara</span><b id="vLembap">-</b></div>
+  <div class="nilai"><span>Kecepatan angin</span><b id="vAngin">-</b></div>
+  <div class="nilai"><span>Daya panel surya</span><b id="vSurya">-</b></div>
+</div>
+
+<div class="kartu" id="info">
+  <h2 id="infoJudul">Klik bagian prototype</h2>
+  <p id="infoIsi">Putar dengan menahan klik kiri, geser dengan klik kanan, zoom dengan scroll. Klik tanaman, ikan, filter, sensor, atau kotak kontrol untuk melihat penjelasannya.</p>
+</div>
+
+<div id="tip"></div>
+<div id="petunjuk">Drag: putar &bull; Scroll: zoom &bull; Klik komponen: info</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+// ====================== SETUP DASAR ======================
+const adegan = new THREE.Scene();
+const kamera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 200);
+kamera.position.set(12, 8.5, 14);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const kontrol = new THREE.OrbitControls(kamera, renderer.domElement);
+kontrol.target.set(0, 3.2, 0);
+kontrol.enableDamping = true;
+kontrol.autoRotateSpeed = 1.2;
+kontrol.maxPolarAngle = Math.PI * 0.52;
+
+adegan.add(new THREE.HemisphereLight(0xffffff, 0x88b4bd, 0.9));
+const matahari = new THREE.DirectionalLight(0xffffff, 0.8);
+matahari.position.set(8, 14, 9);
+adegan.add(matahari);
+
+// ====================== STATE (tanpa array, tanpa if/else) ======================
+let pompa = 1, kaca = 1, putar = 0;
+let waktu = 0, waktuIkan = 0, kecIkan = 1, bongkar = 0;
+const teks = { pompa: { 0: 'MATI', 1: 'HIDUP' }, kaca: { 0: 'BENING', 1: 'TRANSPARAN' }, putar: { 0: 'MATI', 1: 'HIDUP' } };
+
+// ====================== MATERIAL ======================
+const std = (warna, kasar = 0.6) => new THREE.MeshStandardMaterial({ color: warna, roughness: kasar });
+const mPutih = std(0xf3f6f8, 0.5);
+const mPipa = std(0xe6ecef, 0.35);
+const mGelap = std(0x2b3d48, 0.5);
+const mTanah = std(0x5a3d2b, 0.9);
+const mKerikil = std(0xb8ab8c, 1);
+const mIkan1 = std(0xe0a030, 0.4);
+const mIkan2 = std(0xcfcfb4, 0.4);
+const mBiru = std(0x2f6fa8, 0.4);
+const mKaca = new THREE.MeshStandardMaterial({ color: 0xaee6ee, transparent: true, opacity: 0.2, roughness: 0.1, depthWrite: false, side: THREE.DoubleSide });
+const mAir = new THREE.MeshStandardMaterial({ color: 0x5ec7d6, transparent: true, opacity: 0.32, roughness: 0.1, depthWrite: false });
+const mJet = new THREE.MeshBasicMaterial({ color: 0xdff6fb, transparent: true, opacity: 0.6 });
+
+// ====================== HELPER ======================
+const interaktif = new THREE.Group();
+adegan.add(interaktif);
+
+function grup(key, induk = interaktif) {
+  const g = new THREE.Group();
+  g.userData.key = key;
+  induk.add(g);
+  return g;
+}
+function kotak(w, h, d, mat, x, y, z, induk) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z);
+  induk.add(m);
+  return m;
+}
+function silinder(r, h, mat, x, y, z, induk, seg = 24) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), mat);
+  m.position.set(x, y, z);
+  induk.add(m);
+  return m;
+}
+function bola(r, mat, x, y, z, induk, sx = 1, sy = 1, sz = 1) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), mat);
+  m.position.set(x, y, z);
+  m.scale.set(sx, sy, sz);
+  induk.add(m);
+  return m;
+}
+function kabel(x1, y1, z1, x2, y2, z2, induk) {
+  const kurva = new THREE.QuadraticBezierCurve3(
+    new THREE.Vector3(x1, y1, z1),
+    new THREE.Vector3((x1 + x2) / 2, Math.max(y1, y2) + 0.8, (z1 + z2) / 2),
+    new THREE.Vector3(x2, y2, z2)
+  );
+  const m = new THREE.Mesh(new THREE.TubeGeometry(kurva, 24, 0.03, 6), mGelap);
+  induk.add(m);
+}
+
+// ====================== TANGKI (kaca, air, kerikil) ======================
+const gDasar = grup('tangki');
+kotak(9.0, 0.45, 5.8, mPutih, 0, -0.225, 0, gDasar);
+
+const kacaTangki = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 5), mKaca);
+kacaTangki.position.set(0, 2, 0);
+adegan.add(kacaTangki);
+const rangkaKaca = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(8, 4, 5)),
+  new THREE.LineBasicMaterial({ color: 0x6fb8c4 })
+);
+rangkaKaca.position.set(0, 2, 0);
+adegan.add(rangkaKaca);
+
+const air = new THREE.Mesh(new THREE.BoxGeometry(7.92, 3.4, 4.92), mAir);
+air.position.set(0, 1.7, 0);
+adegan.add(air);
+const kerikil = new THREE.Mesh(new THREE.BoxGeometry(7.9, 0.28, 4.9), mKerikil);
+kerikil.position.set(0, 0.14, 0);
+adegan.add(kerikil);
+
+// teratai
+function teratai(x, z) {
+  silinder(0.45, 0.03, std(0x4c9a4a), x, 3.42, z, adegan, 20);
+  bola(0.14, std(0xffffff), x, 3.5, z, adegan, 1, 0.7, 1);
+}
+teratai(-3, -1.6);
+teratai(-2.2, -1.9);
+teratai(3, 1.8);
+
+// ====================== RANGKA & PIPA ======================
+const gRangka = grup('rangka');
+const mRangka = std(0xdfe5e8, 0.4);
+function tiangSudut(x, z) {
+  kotak(0.3, 5.2, 0.3, mRangka, x, 2.6, z, gRangka);
+  kotak(0.4, 0.12, 0.4, mGelap, x, 0.06, z, gRangka);
+}
+tiangSudut(-4.4, -2.7); tiangSudut(4.4, -2.7); tiangSudut(-4.4, 2.7); tiangSudut(4.4, 2.7);
+// balok atas dan bawah
+function balokX(y, z) { kotak(9.0, 0.26, 0.26, mRangka, 0, y, z, gRangka); }
+function balokZ(y, x) { kotak(0.26, 0.26, 5.6, mRangka, x, y, 0, gRangka); }
+balokX(4.95, -2.7); balokX(4.95, 2.7); balokZ(4.95, -4.4); balokZ(4.95, 4.4);
+balokX(0.15, -2.7); balokX(0.15, 2.7); balokZ(0.15, -4.4); balokZ(0.15, 4.4);
+// siku penguat diagonal di tiap sudut atas
+for (let i = 0; i < 2; i++) {
+  for (let j = 0; j < 2; j++) {
+    const sx = i * 2 - 1;
+    const sz = j * 2 - 1;
+    const siku1 = kotak(1.0, 0.12, 0.12, mRangka, sx * 4.05, 4.55, sz * 2.7, gRangka);
+    siku1.rotation.z = -sx * Math.PI / 4;
+    const siku2 = kotak(0.12, 0.12, 1.0, mRangka, sx * 4.4, 4.55, sz * 2.35, gRangka);
+    siku2.rotation.x = sz * Math.PI / 4;
+  }
+}
+
+// ====================== POMPA & ALIRAN AIR ======================
+const gPompa = grup('pompa');
+silinder(0.12, 5.0, mPipa, -3.6, 2.5, 2.1, gPompa);            // pipa naik dari dasar
+kotak(0.7, 0.5, 0.5, mBiru, -3.6, 0.5, 2.1, gPompa);            // unit pompa
+const pipaMendatar = silinder(0.12, 2.6, mPipa, -2.3, 5.0, 2.1, gPompa); pipaMendatar.rotation.z = Math.PI / 2;
+
+const gGrow = grup('growbed');
+kotak(8.8, 0.3, 5.4, mPutih, 0, 5.15, 0, gGrow);
+
+const gJet = new THREE.Group();
+const gCincin = new THREE.Group();
+adegan.add(gJet);
+adegan.add(gCincin);
+function buatJet(x, z) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.16, 1, 12), mJet);
+  m.position.set(x, 4.2, z);
+  gJet.add(m);
+  const cincin = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.04, 6, 24), mJet);
+  cincin.rotation.x = Math.PI / 2;
+  cincin.position.set(x, 3.42, z);
+  gCincin.add(cincin);
+}
+buatJet(-1.5, -0.4); buatJet(0.1, -0.4); buatJet(1.7, -0.4);
+
+// gelembung udara
+const gGelembung = new THREE.Group();
+adegan.add(gGelembung);
+for (let i = 0; i < 14; i++) {
+  const b = bola(0.07, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 }),
+    -3.6 + (Math.random() - 0.5) * 0.5, 0.5, 2.1 + (Math.random() - 0.5) * 0.4, gGelembung);
+  b.userData.p = Math.random() * 3;
+  b.userData.x = b.position.x;
+  b.userData.z = b.position.z;
+}
+
+// ====================== TANAMAN ======================
+const gTanaman = grup('tanaman', gGrow);
+for (let i = 0; i < 6; i++) {
+  for (let j = 0; j < 2; j++) {
+    const px = -3.75 + i * 1.5;
+    const pz = -1.35 + j * 2.7;
+    kotak(1.15, 0.55, 1.5, mPutih, px, 5.575, pz, gGrow);
+    kotak(1.0, 0.05, 1.35, mTanah, px, 5.83, pz, gGrow);
+    const tanaman = new THREE.Group();
+    tanaman.position.set(px, 5.9, pz);
+    tanaman.userData.goyang = Math.random() * 6;
+    gTanaman.add(tanaman);
+    for (let k = 0; k < 9; k++) {
+      const sudut = (k / 9) * Math.PI * 2;
+      const warna = new THREE.Color().setHSL(0.27 + Math.random() * 0.07, 0.6, 0.28 + Math.random() * 0.14);
+      const daun = bola(0.36, new THREE.MeshStandardMaterial({ color: warna, roughness: 0.7 }),
+        Math.cos(sudut) * 0.32, 0.25 + Math.random() * 0.3, Math.sin(sudut) * 0.45, tanaman, 1, 0.55, 1);
+      daun.rotation.y = sudut;
+    }
+    bola(0.4, std(0x3f9a3a, 0.7), 0, 0.6, 0, tanaman, 1, 0.6, 1);
+  }
+}
+
+// ====================== IKAN ======================
+const gIkan = grup('ikan');
+for (let i = 0; i < 16; i++) {
+  const ikan = new THREE.Group();
+  const mat = { 0: mIkan2, 1: mIkan1, 2: mIkan1 }[i % 3];
+  bola(1, mat, 0, 0, 0, ikan, 0.5, 0.26, 0.12);
+  const ekor = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.4, 4), mat);
+  ekor.rotation.z = -Math.PI / 2;
+  ekor.position.set(-0.62, 0, 0);
+  ikan.add(ekor);
+  bola(0.04, mGelap, 0.32, 0.06, 0.1, ikan);
+  bola(0.04, mGelap, 0.32, 0.06, -0.1, ikan);
+  const skala = 0.8 + Math.random() * 0.7;
+  ikan.scale.set(skala, skala, skala);
+  ikan.userData.s = (0.25 + Math.random() * 0.45) * (i % 2 * 2 - 1);
+  ikan.userData.p = Math.random() * 6.28;
+  ikan.userData.rx = 1 + Math.random() * 2.6;
+  ikan.userData.rz = 0.6 + Math.random() * 1.5;
+  ikan.userData.cy = 0.9 + Math.random() * 2;
+  gIkan.add(ikan);
+}
+
+// ====================== BIOFILTER ======================
+const gFilter = grup('filter');
+for (let i = 0; i < 3; i++) {
+  const fx = 1.2 + i * 1.0;
+  silinder(0.38, 2.0, mPutih, fx, 1.25, -1.6, gFilter, 28);
+  silinder(0.42, 0.12, mPipa, fx, 2.3, -1.6, gFilter, 28);
+  for (let h = 0; h < 3; h++) {
+    const lubang = silinder(0.09, 0.1, mGelap, fx, 0.7 + h * 0.6, -1.6 + 0.37, gFilter, 12);
+    lubang.rotation.x = Math.PI / 2;
+  }
+}
+
+// ====================== KOTAK KONTROL (ESP32) ======================
+const gKontrol = grup('kontrol');
+kotak(1.7, 1.2, 0.9, mPutih, 2.2, 0.85, 1.6, gKontrol);
+silinder(0.14, 0.15, mPipa, 3.15, 0.85, 1.6, gKontrol).rotation.z = Math.PI / 2;
+silinder(0.12, 0.1, mGelap, 2.2, 1.35, 1.9, gKontrol).rotation.x = Math.PI / 2;
+const kanvasLayar = document.createElement('canvas');
+kanvasLayar.width = 256; kanvasLayar.height = 160;
+const ctx = kanvasLayar.getContext('2d');
+const teksturLayar = new THREE.CanvasTexture(kanvasLayar);
+const layar = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.68), new THREE.MeshBasicMaterial({ map: teksturLayar }));
+layar.position.set(2.1, 0.95, 2.06);
+gKontrol.add(layar);
+
+// ====================== SENSOR ======================
+function buatSensor(key, x, z, tinggi, warnaTip) {
+  const g = grup(key);
+  silinder(0.09, tinggi, mBiru, x, 4.4 - tinggi / 2, z, g, 14);
+  silinder(0.05, 0.4, mGelap, x, 4.4 + 0.2, z, g, 10);
+  bola(0.11, new THREE.MeshBasicMaterial({ color: warnaTip }), x, 4.4 - tinggi, z, g);
+  kabel(x, 4.6, z, 2.2, 1.5, 1.6, g);
+  return g;
+}
+buatSensor('sensor_ph', -1.2, 1.8, 3.1, 0x33ff99);
+buatSensor('sensor_suhu', 0.6, 1.0, 2.0, 0xff7755);
+buatSensor('sensor_do', -3.0, 0.4, 2.6, 0x55bbff);
+
+// stasiun cuaca: anemometer + sensor kelembapan
+const gCuaca = grup('cuaca');
+silinder(0.05, 3.0, mPipa, 3.6, 6.8, 0.0, gCuaca, 10);
+silinder(0.12, 0.8, mPutih, 3.2, 6.2, 0.0, gCuaca, 12);
+const cangkir = new THREE.Group();
+cangkir.position.set(3.6, 8.4, 0);
+gCuaca.add(cangkir);
+for (let a = 0; a < 3; a++) {
+  const sudut = (a / 3) * Math.PI * 2;
+  const lengan = silinder(0.025, 0.7, mGelap, Math.cos(sudut) * 0.35, 0, Math.sin(sudut) * 0.35, cangkir, 6);
+  lengan.rotation.z = Math.PI / 2;
+  lengan.rotation.y = -sudut;
+  bola(0.14, mGelap, Math.cos(sudut) * 0.7, 0, Math.sin(sudut) * 0.7, cangkir, 1, 1, 1);
+}
+kotak(0.7, 0.05, 0.1, mGelap, 3.6, 8.1, 0, gCuaca);
+
+// ====================== PANEL SURYA ======================
+const gSurya = grup('surya');
+const kanvasPanel = document.createElement('canvas');
+kanvasPanel.width = 256; kanvasPanel.height = 180;
+const cp = kanvasPanel.getContext('2d');
+cp.fillStyle = '#1d4f9e'; cp.fillRect(0, 0, 256, 180);
+cp.strokeStyle = '#cfe0ff'; cp.lineWidth = 2;
+for (let g = 0; g <= 8; g++) { cp.beginPath(); cp.moveTo(g * 32, 0); cp.lineTo(g * 32, 180); cp.stroke(); }
+for (let g = 0; g <= 6; g++) { cp.beginPath(); cp.moveTo(0, g * 30); cp.lineTo(256, g * 30); cp.stroke(); }
+const mPanel = new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(kanvasPanel), roughness: 0.25, metalness: 0.3 });
+silinder(0.07, 3.4, mPipa, 4.6, 6.7, -2.2, gSurya, 12);
+const panel = new THREE.Group();
+panel.position.set(4.6, 8.7, -2.2);
+panel.rotation.x = 0.5;
+gSurya.add(panel);
+kotak(2.5, 0.1, 1.7, mPutih, 0, -0.02, 0, panel);
+kotak(2.3, 0.06, 1.5, mPanel, 0, 0.04, 0, panel);
+kabel(4.6, 5.1, -2.2, 2.2, 1.5, 1.6, gSurya);
+
+// ====================== INFO KOMPONEN ======================
+const info = {
+  tangki:     { judul: 'Tangki Ikan', isi: 'Tangki kaca 8 x 5 x 4 satuan berisi ikan (nila/lele) dan dasar kerikil. Air kaya nutrisi dari kotoran ikan dialirkan ke bak tanaman.' },
+  rangka:     { judul: 'Rangka Penopang', isi: 'Rangka kokoh dengan siku penguat di tiap sudut menopang bak tanam di atas tangki dan menjadi tempat dudukan pipa serta kabel.' },
+  pompa:      { judul: 'Pompa & Aliran Air', isi: 'Pompa mengangkat air dari tangki ke bak tanaman, lalu air jatuh kembali ke tangki lewat tiga pancuran yang menambah oksigen. Tombol Pompa mengaktifkan/mematikan aliran.' },
+  growbed:    { judul: 'Bak Tanam (Grow Bed)', isi: '12 pot di atas tangki. Akar menyerap nutrisi dari air sehingga air kembali bersih (siklus tertutup, hemat air).' },
+  tanaman:    { judul: 'Tanaman Sayur', isi: 'Sayuran daun (selada, kangkung, bayam) tumbuh tanpa tanah. Cocok untuk lahan sempit di wilayah pesisir Kendari.' },
+  ikan:       { judul: 'Ikan Budidaya', isi: 'Ikan menghasilkan amonia yang diubah bakteri menjadi nitrat sebagai pupuk alami tanaman.' },
+  filter:     { judul: 'Biofilter', isi: 'Tiga tabung berlubang sebagai rumah bakteri nitrifikasi yang mengubah amonia menjadi nitrat.' },
+  kontrol:    { judul: 'Kotak Kontrol ESP32', isi: 'Otak IoT: membaca semua sensor, menampilkan data di layar, dan mengirim ke aplikasi mobile lewat WiFi.' },
+  sensor_ph:  { judul: 'Sensor pH', isi: 'Memantau keasaman air. Rentang ideal akuaponik sekitar 6,5 - 7,5.' },
+  sensor_suhu:{ judul: 'Sensor Suhu Air', isi: 'Memantau suhu air. Rentang ideal sekitar 26 - 30 derajat Celsius.' },
+  sensor_do:  { judul: 'Sensor Oksigen Terlarut (DO)', isi: 'Memantau kadar oksigen untuk ikan dan bakteri. Idealnya di atas 5 mg/L.' },
+  surya:      { judul: 'Panel Surya', isi: 'Memasok listrik mandiri untuk ESP32, sensor, pompa, dan aerator, sehingga cocok untuk lokasi pesisir tanpa jaringan listrik yang stabil.' },
+  cuaca:      { judul: 'Stasiun Cuaca Mini', isi: 'Anemometer (kecepatan angin) dan sensor kelembapan udara untuk menyesuaikan perawatan di area pesisir.' }
+};
+const infoJudul = document.getElementById('infoJudul');
+const infoIsi = document.getElementById('infoIsi');
+
+// ====================== INTERAKSI (raycaster) ======================
+const ray = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const tip = document.getElementById('tip');
+
+function hitPertama(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, kamera);
+  return ray.intersectObjects(interaktif.children, true).slice(0, 1);
+}
+function grupKey(objek) {
+  let o = objek;
+  while (o.parent && !o.userData.key) { o = o.parent; }
+  return o;
+}
+function sorot(objek, hex) {
+  objek.traverse(m => { m.material && m.material.emissive && m.material.emissive.setHex(hex); });
+}
+renderer.domElement.addEventListener('pointermove', e => {
+  sorot(interaktif, 0x000000);
+  renderer.domElement.style.cursor = 'default';
+  tip.style.opacity = 0;
+  hitPertama(e).forEach(h => {
+    const g = grupKey(h.object);
+    sorot(g, 0x1a6070);
+    renderer.domElement.style.cursor = 'pointer';
+    tip.textContent = info[g.userData.key].judul;
+    tip.style.left = (e.clientX + 14) + 'px';
+    tip.style.top = (e.clientY + 14) + 'px';
+    tip.style.opacity = 1;
+  });
+});
+renderer.domElement.addEventListener('click', e => {
+  hitPertama(e).forEach(h => {
+    const d = info[grupKey(h.object).userData.key];
+    infoJudul.textContent = d.judul;
+    infoIsi.textContent = d.isi;
+  });
+});
+
+// ====================== KONTROL UI ======================
+const btnPompa = document.getElementById('btnPompa');
+const btnKaca = document.getElementById('btnKaca');
+const btnPutar = document.getElementById('btnPutar');
+btnPompa.onclick = () => { pompa = 1 - pompa; btnPompa.textContent = teks.pompa[pompa]; };
+btnKaca.onclick = () => { kaca = 1 - kaca; btnKaca.textContent = teks.kaca[kaca]; mKaca.opacity = 0.06 + 0.16 * kaca; };
+btnPutar.onclick = () => { putar = 1 - putar; btnPutar.textContent = teks.putar[putar]; kontrol.autoRotate = !!putar; };
+document.getElementById('sldBongkar').oninput = e => { bongkar = e.target.value / 100; };
+document.getElementById('sldIkan').oninput = e => { kecIkan = e.target.value / 100; };
+
+const vPh = document.getElementById('vPh');
+const vSuhu = document.getElementById('vSuhu');
+const vDo = document.getElementById('vDo');
+const vLembap = document.getElementById('vLembap');
+const vAngin = document.getElementById('vAngin');
+const vSurya = document.getElementById('vSurya');
+
+// ====================== LOOP ANIMASI ======================
+const jam = new THREE.Clock();
+function animasi() {
+  requestAnimationFrame(animasi);
+  const dt = jam.getDelta();
+  waktu += dt;
+  waktuIkan += dt * kecIkan;
+
+  // data sensor simulasi
+  const ph = 6.8 + 0.15 * Math.sin(waktu * 0.5);
+  const suhu = 28.4 + 0.6 * Math.sin(waktu * 0.3);
+  const oksigen = 5.6 + 0.4 * Math.sin(waktu * 0.7) + 1.0 * pompa;
+  const lembap = 78 + 5 * Math.sin(waktu * 0.2);
+  const angin = 2.5 + 1.2 * Math.sin(waktu * 0.9);
+  const surya = 42 + 12 * Math.sin(waktu * 0.15);
+  vPh.textContent = ph.toFixed(2);
+  vSuhu.textContent = suhu.toFixed(1) + ' \u00B0C';
+  vDo.textContent = oksigen.toFixed(1) + ' mg/L';
+  vLembap.textContent = lembap.toFixed(0) + ' %';
+  vAngin.textContent = angin.toFixed(1) + ' m/s';
+  vSurya.textContent = surya.toFixed(0) + ' W';
+
+  // layar ESP32
+  ctx.fillStyle = '#0d3b46'; ctx.fillRect(0, 0, 256, 160);
+  ctx.fillStyle = '#7dffd0'; ctx.font = 'bold 17px monospace';
+  ctx.fillText('ESP32 AKUAPONIK', 14, 24);
+  ctx.font = '15px monospace';
+  ctx.fillText('pH   : ' + ph.toFixed(2), 14, 50);
+  ctx.fillText('Suhu : ' + suhu.toFixed(1) + ' C', 14, 72);
+  ctx.fillText('DO   : ' + oksigen.toFixed(1) + ' mg/L', 14, 94);
+  ctx.fillText('Pompa: ' + teks.pompa[pompa], 14, 116);
+  ctx.fillText('Surya: ' + surya.toFixed(0) + ' W', 14, 138);
+  teksturLayar.needsUpdate = true;
+
+  // ikan berenang
+  gIkan.children.forEach(f => {
+    const u = f.userData;
+    const a = waktuIkan * u.s + u.p;
+    const arah = Math.sign(u.s);
+    f.position.set(Math.cos(a) * u.rx, u.cy + Math.sin(a * 2) * 0.12, Math.sin(a) * u.rz);
+    f.rotation.y = Math.atan2(-Math.cos(a) * u.rz * arah, -Math.sin(a) * u.rx * arah);
+    f.rotation.z = Math.sin(waktu * 6 + u.p) * 0.06;
+  });
+
+  // pancuran air
+  const tinggiJet = 1.5 + bongkar * 3.5;
+  gJet.children.forEach((m, i) => {
+    m.visible = !!pompa;
+    m.scale.x = 1 + Math.sin(waktu * 18 + i) * 0.12;
+    m.scale.z = m.scale.x;
+    m.scale.y = tinggiJet;
+    m.position.y = 3.45 + tinggiJet / 2;
+  });
+  gCincin.children.forEach(c => {
+    c.visible = !!pompa;
+    c.scale.set(1 + Math.sin(waktu * 6) * 0.2, 1 + Math.sin(waktu * 6) * 0.2, 1);
+  });
+
+  // gelembung
+  gGelembung.children.forEach(b => {
+    b.visible = !!pompa;
+    b.position.y = 0.5 + ((waktu * 0.7 + b.userData.p) % 3);
+    b.position.x = b.userData.x + Math.sin(waktu * 3 + b.userData.p) * 0.05;
+  });
+
+  // tanaman bergoyang
+  gTanaman.children.forEach(t => { t.rotation.z = Math.sin(waktu * 1.2 + t.userData.goyang) * 0.03; });
+
+  // anemometer
+  cangkir.rotation.y += dt * (1 + angin * 2);
+
+  // exploded view
+  gGrow.position.y = bongkar * 3.5;
+  gFilter.position.x = bongkar * 2.8;
+  gKontrol.position.x = bongkar * 2.2;
+  gKontrol.position.z = bongkar * 2.4;
+  gPompa.position.x = -bongkar * 1.6;
+
+  kontrol.update();
+  renderer.render(adegan, kamera);
+}
+animasi();
+
+addEventListener('resize', () => {
+  kamera.aspect = innerWidth / innerHeight;
+  kamera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
